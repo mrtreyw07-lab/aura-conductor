@@ -1,0 +1,9 @@
+# The allow-list the demo approves with. conductor refuses a policy file that lives inside the repository it runs
+# in, as an agent working there could edit it.
+
+[policy]
+kinds = ["run", "land"]
+adapters = ["scripted"]
+commands = ["{python}"]
+max_tier = "T3"
+max_parallel = 4

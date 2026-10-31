@@ -1,0 +1,47 @@
+# A workflow for real agents: Codex implements, Claude Code reviews (T2 needs a reviewer from another family), and
+# the project's own tests decide. Copy it into your repository and change the packages; `conductor validate` checks
+# it. Both CLIs must already be signed in (`codex login`, `claude`), as conductor passes them no credential.
+
+version = 1
+name = "add-a-health-endpoint"
+integration_branch = "main"
+max_parallel = 2
+
+[[packages]]
+id = "health"
+title = "Health endpoint"
+instruction = """
+Add a GET /health endpoint to app/server.py that returns {"status": "ok"} with HTTP 200,
+and a test for it in tests/test_health.py. Keep the existing style of the routes in that file.
+"""
+files = ["app/server.py", "tests/test_health.py"]
+verification_tier = "T2"
+max_attempts = 3
+timeout_seconds = 1800
+
+[packages.agent]
+adapter = "codex_cli"
+
+[packages.reviewer]
+adapter = "claude_code"
+
+[packages.acceptance]
+checks = [
+  { argv = ["{python}", "-m", "pytest", "-q"], timeout_seconds = 600 },
+]
+
+[[packages]]
+id = "docs"
+title = "Document the endpoint"
+instruction = "Document GET /health in docs/api.md, in the same format as the other endpoints."
+depends_on = ["health"]
+files = ["docs/api.md"]
+verification_tier = "T0"
+
+[packages.agent]
+adapter = "claude_code"
+
+[packages.acceptance]
+checks = [
+  { argv = ["{python}", "-c", "assert '/health' in open('docs/api.md').read()"], timeout_seconds = 30 },
+]

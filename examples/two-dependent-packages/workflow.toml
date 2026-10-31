@@ -1,0 +1,131 @@
+# The demo workflow. Three packages, scripted agents (no model, no API key), one acceptance check each.
+#
+#   A  adds a greeting module, and a line to the README.
+#   B  adds a command-line entry point that uses A's module, so it depends on A: it starts only after A lands.
+#   C  adds a farewell module, and a line to the same spot in the README. It runs beside A; whichever lands
+#      second no longer squashes cleanly, and the merge queue returns it as rework.
+
+version = 1
+name = "greeter"
+integration_branch = "main"
+max_parallel = 2
+
+[[packages]]
+id = "A"
+title = "Greeting module"
+instruction = "Add greeter/greeting.py with greet(name), its test, and a line for it in the README."
+files = ["greeter/greeting.py", "tests/test_greeting.py", "README.md"]
+verification_tier = "T0"
+
+[packages.agent]
+adapter = "scripted"
+name = "implementer"
+steps = [
+  { write = "greeter/greeting.py", content = '''def greet(name: str) -> str:
+    return f"Hello, {name}!"
+''' },
+  { write = "tests/test_greeting.py", content = '''import unittest
+
+from greeter.greeting import greet
+
+
+class GreetingTest(unittest.TestCase):
+    def test_greet(self):
+        self.assertEqual(greet("Ada"), "Hello, Ada!")
+''' },
+  { append = "README.md", text = "- `greeting`: says hello\n" },
+]
+
+[packages.acceptance]
+checks = [
+  { argv = ["{python}", "-m", "unittest", "discover", "-s", "tests"], timeout_seconds = 120 },
+  # Stands in for a slower suite, so A's landing takes long enough for C to queue behind it.
+  { argv = ["{python}", "-c", "import time; time.sleep(1.5)"], timeout_seconds = 30 },
+]
+
+[[packages]]
+id = "B"
+title = "Command-line entry point"
+instruction = "Add greeter/cli.py that prints greet(sys.argv[1]), and its test."
+depends_on = ["A"]
+files = ["greeter/cli.py", "tests/test_cli.py"]
+verification_tier = "T0"
+
+[packages.agent]
+adapter = "scripted"
+name = "implementer"
+steps = [
+  { write = "greeter/cli.py", content = '''import sys
+
+from greeter.greeting import greet
+
+
+def main(argv: list[str]) -> int:
+    print(greet(argv[1] if len(argv) > 1 else "world"))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
+''' },
+  # Long enough for the operator's Stop to land half-way through this stage.
+  { sleep = 1.5 },
+  { write = "tests/test_cli.py", content = '''import contextlib
+import io
+import unittest
+
+from greeter.cli import main
+
+
+class CliTest(unittest.TestCase):
+    def test_main(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(["greeter", "Ada"]), 0)
+        self.assertEqual(out.getvalue(), "Hello, Ada!\n")
+''' },
+]
+
+[packages.acceptance]
+checks = [
+  { argv = ["{python}", "-m", "unittest", "discover", "-s", "tests"], timeout_seconds = 120 },
+]
+
+[[packages]]
+id = "C"
+title = "Farewell module"
+instruction = "Add greeter/farewell.py with farewell(name), its test, and a line for it in the README."
+files = ["greeter/farewell.py", "tests/test_farewell.py", "README.md"]
+verification_tier = "T1"
+max_attempts = 3
+
+[packages.agent]
+adapter = "scripted"
+name = "implementer"
+steps = [
+  # Only the first attempt is slow: it finishes after A has queued, and before A has landed.
+  { sleep = 2.0, attempts = [1] },
+  { write = "greeter/farewell.py", content = '''def farewell(name: str) -> str:
+    return f"Goodbye, {name}."
+''' },
+  { write = "tests/test_farewell.py", content = '''import unittest
+
+from greeter.farewell import farewell
+
+
+class FarewellTest(unittest.TestCase):
+    def test_farewell(self):
+        self.assertEqual(farewell("Ada"), "Goodbye, Ada.")
+''' },
+  { append = "README.md", text = "- `farewell`: says goodbye\n" },
+]
+
+[packages.reviewer]
+adapter = "scripted"
+name = "reviewer"
+verdicts = ["approve"]
+
+[packages.acceptance]
+checks = [
+  { argv = ["{python}", "-m", "unittest", "discover", "-s", "tests"], timeout_seconds = 120 },
+]
